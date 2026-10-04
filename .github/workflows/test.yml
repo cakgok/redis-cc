@@ -1,0 +1,67 @@
+name: Redis CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Redis (${{ matrix.profile }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - profile: debug
+            build_type: Debug
+            sanitizer: ""
+          - profile: asan
+            build_type: Debug
+            sanitizer: address
+          - profile: tsan
+            build_type: Debug
+            sanitizer: thread
+          - profile: release
+            build_type: Release
+            sanitizer: ""
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check out pinned tester
+        run: sh ci/fetch-tester.sh
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: vendor/redis-tester/go.mod
+          cache-dependency-path: vendor/redis-tester/go.sum
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake g++ make libasio-dev python3
+
+      - name: Build Redis
+        env:
+          BUILD_TYPE: ${{ matrix.build_type }}
+          REDIS_SANITIZER: ${{ matrix.sanitizer }}
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE="$BUILD_TYPE" -DREDIS_SANITIZER="$REDIS_SANITIZER"
+          cmake --build build
+
+      - name: Build tester
+        run: make tester
+
+      # High-entropy ASLR on Linux can conflict with TSan's shadow memory.
+      # Reduce mmap randomization so mappings stay within TSan's expected ranges
+      - name: Configure address space for TSan
+        if: matrix.profile == 'tsan'
+        run: sudo sysctl -w vm.mmap_rnd_bits=28
+
+      - name: Run required stages
+        env:
+          ASAN_OPTIONS: halt_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+          TSAN_OPTIONS: halt_on_error=1
+        run: sh ci/run-tests.sh

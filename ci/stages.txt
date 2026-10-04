@@ -1,0 +1,5 @@
+# Required CodeCrafters stages for this commit, in execution order.
+# Keep earlier stages when adding a new one.
+# See the downloaded tester registry:
+# vendor/redis-tester/internal/tester_definition.go
+jm1  # Bind to a port
